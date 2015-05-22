@@ -17,3 +17,10 @@
 # produced vignettes
 vignettes/*.html
 vignettes/*.pdf
+
+# C++ objects from build 
+*.o
+*.so
+
+# package build for testing
+*.tar.gz
