@@ -2,6 +2,12 @@
 .Rhistory
 .Rapp.history
 
+# Eclipse project stuff
+.project
+
+# Mac stuff
+.DS_Store
+
 # Example code in package build process
 *-Ex.R
 
