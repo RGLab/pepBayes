@@ -83,7 +83,9 @@ PairedMcmc::PairedMcmc(const Rcpp::List & par_list, const Rcpp::List & data_list
     mu_temp = arma::vec(n_slide - 1, arma::fill::zeros);
     mu_star_mean = arma::vec(n_slide - 1, arma::fill::zeros);
     mu_star = arma::vec(n_slide - 1, arma::fill::zeros);
+
     Q = Rcpp::as<arma::mat>(par_list["Q"]);
+    Qt = Q.t();
     mu_omega = arma::mat(n_slide - 1, n_slide - 1, arma::fill::zeros);
     mu_prec_inner_diag = arma::vec(n_slide, arma::fill::zeros);
 
@@ -177,7 +179,8 @@ void PairedMcmc::iterate() {
 
         #pragma omp for
         for (i = 0; i < n_subject; i++) {
-            computeMuMean(i);
+            if (update_mu)
+                computeMuMean(i);
         }
 
         #pragma omp sections
@@ -301,11 +304,11 @@ void PairedMcmc::computeMuMean(const int & i) {
 
 void PairedMcmc::updateMu(RngStream & rng) {
     // Get cholesky decomposition of conditional precision
-    mu_omega = Q.t() * arma::diagmat(mu_prec_inner_diag) * Q;
+    mu_omega = Qt * arma::diagmat(mu_prec_inner_diag) * Q;
     mu_omega.diag() += 1.0;
     mu_omega = arma::chol(mu_omega);
     // do forward/back solve to get the conditional mean
-    mu_temp = arma::solve(mu_omega.t(), Q.t() * mu_mean);
+    mu_temp = arma::solve(mu_omega.t(), Qt * mu_mean);
     mu_star_mean = arma::solve(mu_omega, mu_temp);
     // fill with n(0, 1) values
     for(int i = 0; i < n_slide - 1; i++) {
@@ -315,6 +318,7 @@ void PairedMcmc::updateMu(RngStream & rng) {
     mu_star = arma::solve(mu_omega, mu_temp) + mu_star_mean;
     // transform mu_star to recover mu
     mu = Q * mu_star;
+    return;
 }
 
 void PairedMcmc::updateM0(RngStream & rng) {

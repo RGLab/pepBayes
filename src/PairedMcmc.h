@@ -81,7 +81,7 @@ class PairedMcmc: public MarkovChain {
     arma::vec mu_star;
     arma::vec mu_prec_inner_diag;
     arma::vec mu_temp;
-    arma::mat Q, mu_omega;
+    arma::mat Q, mu_omega, Qt;
 
     // helpers for sampling misc parameters
     MHTuner m_beta1_tuner, nu_beta1_tuner;
