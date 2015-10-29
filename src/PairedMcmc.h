@@ -71,9 +71,11 @@ class PairedMcmc: public MarkovChain {
     bool share_nu_alpha;
 
     // t-distribution dof estimation helpers
-    double nu;
+    double nu_err;
+    double nu_re;
     arma::mat w;
     arma::mat u;
+    arma::mat mahala_dist;
 
     // helpers for sampling mu
     arma::vec mu_mean;
@@ -124,7 +126,9 @@ class PairedMcmc: public MarkovChain {
     void updateNuBeta1(RngStream & rng);
     void updateBetaHypers(const int & q, RngStream & rng);
     void updateGammaAlpha(const int & i, RngStream & rng);
-    void updateWeights(const int & p, RngStream & rng);
+    void computeMahalaDist(const int & i);
+    void updateWeights(const int & i, RngStream & rng);
+    double dfJointDensity(const double x);
 
 public:
     PairedMcmc(const Rcpp::List & par_list, const Rcpp::List & data_list,

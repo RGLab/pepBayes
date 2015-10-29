@@ -74,9 +74,11 @@ PairedMcmc::PairedMcmc(const Rcpp::List & par_list, const Rcpp::List & data_list
     s_eps = Rcpp::as<double>(par_list["s_eps"]);
     lambda_eps = Rcpp::as<double>(par_list["lambda_eps"]);
 
-    nu = Rcpp::as<double>(par_list["nu"]);
+    nu_err = Rcpp::as<double>(par_list["nu"]);
+    nu_re = nu_err;
     w = Rcpp::as<arma::mat>(par_list["w"]);
     u = Rcpp::as<arma::mat>(par_list["u"]);
+    mahala_dist = arma::mat(n_peptide, n_slide, arma::fill::zeros);
 
     // misc helpers for sampling
     mu_mean = arma::vec(n_slide, arma::fill::zeros);
@@ -154,9 +156,10 @@ void PairedMcmc::iterate() {
         }
 
         #pragma omp for
-        for (p = 0; p < n_peptide; p++) {
+        for (i = 0; i < n_subject; i++) {
+            computeMahalaDist(i);
             if (update_weights)
-                updateWeights(p, rng[th_id]);
+                updateWeights(i, rng[th_id]);
         }
 
         #pragma omp single
@@ -573,8 +576,8 @@ void PairedMcmc::updateGammaAlpha(const int & p, RngStream & rng) {
                     -.5 * nu_eps(p) * w(p, j) * n_rep(p) * pow(tmp, 2) +
                     // prior for alpha1
                     log_omega +
-                    .5 * log(nu_alpha1(p)) - .5 * (1.0 + nu) *
-                    log1p(nu_alpha1(p) * pow(cur_val, 2) / nu);
+                    .5 * log(nu_alpha1(p)) - .5 * (1.0 + nu_re) *
+                    log1p(nu_alpha1(p) * pow(cur_val, 2) / nu_re);
             tmp = tmp + beta1(p) + cur_val - alpha0(p, i);
             prop_den = //likelihood
                     -.5 * nu_eps(p) * w(p, j) * n_rep(p) * pow(tmp, 2) +
@@ -582,11 +585,11 @@ void PairedMcmc::updateGammaAlpha(const int & p, RngStream & rng) {
                     log1m_omega;
 
             cur_to_prop = 0.0;
-            prop_to_cur = .5 * log(nu_star) - .5 * (1.0 + nu) *
-                    log1p(nu_star * pow(cur_val - alpha_star, 2) / nu);
+            prop_to_cur = .5 * log(nu_star) - .5 * (1.0 + nu_re) *
+                    log1p(nu_star * pow(cur_val - alpha_star, 2) / nu_re);
         } else {
             cur_val = 0.0;
-            prop_val = RngStream_T(nu, rng) / sqrt(nu_star) +
+            prop_val = RngStream_T(nu_re, rng) / sqrt(nu_star) +
                     alpha_star;
 
             tmp = y_mean(p, j) - beta0(p) - mu(j) - beta1(p) -
@@ -595,8 +598,8 @@ void PairedMcmc::updateGammaAlpha(const int & p, RngStream & rng) {
                     -.5 * nu_eps(p) * w(p, j) * n_rep(p) * pow(tmp, 2) +
                     // prior for alpha1
                     log_omega +
-                    .5 * log(nu_alpha1(p)) - .5 * (1.0 + nu) *
-                    log1p(nu_alpha1(p) * pow(prop_val, 2) / nu);
+                    .5 * log(nu_alpha1(p)) - .5 * (1.0 + nu_re) *
+                    log1p(nu_alpha1(p) * pow(prop_val, 2) / nu_re);
             tmp = tmp + beta1(p) + prop_val - alpha0(p, i);
             cur_den = //likelihood
                     -.5 * nu_eps(p) * w(p, j) * n_rep(p) * pow(tmp, 2) +
@@ -604,8 +607,8 @@ void PairedMcmc::updateGammaAlpha(const int & p, RngStream & rng) {
                     log1m_omega;
 
             prop_to_cur = 0.0;
-            cur_to_prop = .5 * log(nu_star) - .5 * (1.0 + nu) *
-                    log1p(nu_star * pow(prop_val - alpha_star, 2) / nu);
+            cur_to_prop = .5 * log(nu_star) - .5 * (1.0 + nu_re) *
+                    log1p(nu_star * pow(prop_val - alpha_star, 2) / nu_re);
         }
         // check proposal acceptance.
         if (update_alpha)
@@ -616,9 +619,9 @@ void PairedMcmc::updateGammaAlpha(const int & p, RngStream & rng) {
             if (update_gamma)
                 gamma(p, i) = 1.0;
             j = 2 * i + 1;
-            lambda_star = .5 * nu +
+            lambda_star = .5 * nu_re +
                     .5 * nu_alpha1(p) * pow(alpha1(p, i), 2);
-            u(p, j) = RngStream_GA1(.5 + .5 * nu, rng) / lambda_star;
+            u(p, j) = RngStream_GA1(.5 + .5 * nu_re, rng) / lambda_star;
             nu_star = nu_eps(p) * n_rep(p) * w(p, j) +
                     nu_alpha1(p) * u(p, j);
             alpha_star = nu_eps(p) * n_rep(p) * w(p, j) *
@@ -650,39 +653,65 @@ void PairedMcmc::updateGammaAlpha(const int & p, RngStream & rng) {
     }
 }
 
-void PairedMcmc::updateWeights(const int & p, RngStream & rng) {
-    // update the weights for alpha0, eps0, and eps1
-    int i, j;
-    double lambda_star, shape_star;
-    for(i = 0; i < n_subject; i++) {
-        shape_star = .5 + .5 * nu;
-        lambda_star = .5 * pow(alpha0(p, i), 2) * nu_alpha0(p) +
-                .5 * nu;
-        j = 2 * i;
-        u(p, j) = RngStream_GA1(shape_star, rng) / lambda_star;
-
-        shape_star = .5 * n_rep(p) + .5 * nu;
-        lambda_star = .5 * nu_eps(p) * (y_ss(p, j) + n_rep(p) *
-                pow(y_mean(p, j) - beta0(p) - mu(j) - alpha0(p, i), 2)) +
-                .5 * nu;
-        w(p, j) = RngStream_GA1(shape_star, rng) / lambda_star;
-
-        j = 2 * i + 1;
-        if (gamma(p, i) == 0.0) {
-            lambda_star = .5 * nu_eps(p) * (y_ss(p, j) + n_rep(p) *
-                    pow(y_mean(p, j) - beta0(p) - mu(j) - alpha0(p, i), 2)) +
-                    .5 * nu;
-        } else {
-            lambda_star = .5 * nu_eps(p) * (y_ss(p, j) + n_rep(p) *
-                    pow(y_mean(p, j) - beta0(p) -
-                            beta1(p) - mu(j) - alpha1(p, i), 2)) +
-                            .5 * nu;
-        }
-        w(p, j) = RngStream_GA1(shape_star, rng) / lambda_star;
+void PairedMcmc::computeMahalaDist(const int & i) {
+    double d;
+    int j;
+    const double mu_0(2 * i), mu_1(2 * i + 1);
+    j = 2 * i
+    for (int p = 0; p < n_peptide; p++) {
+        d = nu_eps(p) * (y_ss(p, j) + n_rep(p) *
+                pow(y_mean(p, j) - beta0(p) - mu_0 - alpha0(p, i), 2));
+        mahala_dist(p, j) = d;
     }
+
+    j = 2 * i + 1;
+    for (int p = 0; p < n_peptide; p++) {
+        if (gamma(p, i) == 0.0) {
+            d = nu_eps(p) * (y_ss(p, j) + n_rep(p) *
+                    pow(y_mean(p, j) - beta0(p) - mu_1 - alpha0(p, i), 2));
+        } else {
+            d = nu_eps(p) * (y_ss(p, j) + n_rep(p) *
+                    pow(y_mean(p, j) - beta0(p) -
+                            beta1(p) - mu_1 - alpha1(p, i), 2));
+        }
+        mahala_dist(p, j) = d;
+    }
+    return;
 }
 
+void PairedMcmc::updateWeights(const int & i, RngStream & rng) {
+    // update the weights for alpha0, eps0, and eps1
+    int p, j;
+    double lambda_star, shape_star;
 
+    j = 2 * i;
+    for (p = 0; p < n_peptide; p++) {
+        shape_star = .5 + .5 * nu_re;
+        lambda_star = .5 * pow(alpha0(p, i), 2) * nu_alpha0(p) +
+                .5 * nu_re;
+        u(p, j) = RngStream_GA1(shape_star, rng) / lambda_star;
+
+        shape_star = .5 * n_rep(p) + .5 * nu_err;
+        lambda_star = .5 * mahala_dist(p, j) +
+                .5 * (nu_err - 2.0);
+        w(p, j) = RngStream_GA1(shape_star, rng) / lambda_star;
+    }
+
+    j = 2 * i + 1;
+    for (p = 0; p < n_peptide; p++) {
+        shape_star = .5 * n_rep(p) + .5 * nu_err;
+        lambda_star = .5 * mahala_dist(p, j) +
+                .5 * (nu_err - 2.0);
+        w(p, j) = RngStream_GA1(shape_star, rng) / lambda_star;
+    }
+    return;
+}
+
+double PairedMcmc::dfJointDensity(const double x) {
+    double lik(0.0);
+
+    return(lik);
+}
 
 
 
