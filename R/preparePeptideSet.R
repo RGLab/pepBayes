@@ -49,7 +49,7 @@
 #' @author Gregory Imholte
 #' @keywords internal
 .detectMethod = function(peptide_set) {
-    ptid = pData(peptide_set)$ptid
+    ptid = droplevels(pData(peptide_set)$ptid)
     if (all(table(ptid) == 2)) {
         return("paired")
     }
@@ -225,7 +225,8 @@
     names(pset_summary) = lnames
     
     # reorder peptides and summarized data by position
-    match_idx = match(pos_table[, peptide], pset_summary$peptide)
+    pos_table_sub = pos_table[peptide %in% pset_summary$peptide]
+    match_idx = match(pset_summary$peptide, pos_table_sub[, peptide])
     pset_summary = lapply(pset_summary, function(x, idx) {
                 d = dim(x)
                 if (is.null(d)) {
@@ -235,10 +236,10 @@
             }, idx = match_idx)
     names(pset_summary) = lnames
     
-    unique_pos = unique(pos_table[, position])
-    pos_original_scale = pos_table[, position][match(pset_summary$peptide, pos_table[, peptide])]
-    pos = rep(1:length(unique_pos), times = table(pos_table[, position])) - 1
-    pos_count = as.vector(table(pos_table[, position]))
+    unique_pos = unique(pos_table_sub[, position])
+    pos_original_scale = pos_table_sub[, position][match(pset_summary$peptide, pos_table_sub[, peptide])]
+    pos = rep(1:length(unique_pos), times = table(pos_table_sub[, position])) - 1
+    pos_count = as.vector(table(pos_table_sub[, position]))
     n_pos = length(unique_pos)
     pos_start = c(0, (cumsum(pos_count) - 1)[1:(n_pos - 1)])
     
