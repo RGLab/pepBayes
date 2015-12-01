@@ -1,12 +1,25 @@
 Package: pepBayes
 Type: Package
 Title: Bayesian modeling of peptide microarray assay responses
-Version: 0.99.1
-Date: 2015-01-21
+Version: 0.99.2
+Date: 2015-11-13
 Author: Gregory Imholte
 Maintainer: Gregory Imholte <gimholte@uw.edu>
 Description: Bayesian estimates of antibody binding on a per-subject basis
 License: GPLv2
-Imports: parallel, data.table, fastGHQuad
-Depends: Rcpp (>= 0.10.5), RcppArmadillo (>= 0.3.920.1), pepStat
+Imports: 
+	parallel, 
+	data.table, 
+	fastGHQuad, 
+Depends: 
+	Rcpp (>= 0.10.5), 
+	RcppArmadillo (>= 0.3.920.1),
+	pepStat
+Suggests:
+	knitr,
+	pepDat,
+	Pviz
 LinkingTo: Rcpp, RcppArmadillo
+VignetteBuilder: knitr
+NeedsCompilation: yes
+Packaged: 2015-11-13 21:29:37 UTC; gimholte
