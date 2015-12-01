@@ -27,7 +27,7 @@
     rownames(output_list$omega) = data_list$peptide
     rownames(output_list$hypers) = c("s_alpha", "lambda_alpha",
             "s_eps", "lambda_eps", "m_beta0", "nu_beta0", 
-            "m_beta1", "nu_beta1")
+            "m_beta1", "nu_beta1", "nu_err", "nu_re")
     colnames(output_list$ppb) = with(data_list, metadata$ptid[!ctl_ind])
     
     par_output = output_list[c("hypers", "beta0", "beta1", "mu", "nu_eps",
