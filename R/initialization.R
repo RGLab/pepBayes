@@ -203,7 +203,8 @@
             "update_omega_hypers" = TRUE,
             "update_alpha" = TRUE,
             "update_weights" = TRUE,
-            "update_gamma" = TRUE)
+            "update_gamma" = TRUE,
+            "update_dof" = TRUE)
     
     if (is.null(chain_pars_update)) {
         return(c(chain_list, update_list))
