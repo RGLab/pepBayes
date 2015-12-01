@@ -25,15 +25,15 @@ double logspaceSubtract(const double loga, const double logb) {
     return loga + log1p(-exp(logb - loga));
 }
 
-double metropolisHastings(const double & cur_value, const double & cur_lik,
+bool metropolisHastings(const double & cur_value, const double & cur_lik,
         const double & cur_to_prop_trans, const double & prop_value,
         const double & prop_lik, const double & prop_to_cur_trans,
         RngStream rng) {
     const double loga = prop_lik + prop_to_cur_trans - cur_lik - cur_to_prop_trans;
     if (loga >= log(RngStream_RandU01(rng)))
-        return prop_value;
+        return true;
     else
-        return cur_value;
+        return false;
 }
 
 double logFromLogit(const double logit_x) {
