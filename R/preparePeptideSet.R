@@ -49,7 +49,7 @@
 #' @author Gregory Imholte
 #' @keywords internal
 .detectMethod = function(peptide_set) {
-    ptid = droplevels(pData(peptide_set)$ptid)
+    ptid = droplevels(as.factor(pData(peptide_set)$ptid))
     if (all(table(ptid) == 2)) {
         return("paired")
     }
@@ -201,11 +201,7 @@
     peptide_set = .orderPeptideSetColumns(peptide_set, control_id, method)
     pset_summary = .getSummaryStatistics(peptide_set)
     pos_table = .processPositionData(position_data, peptide_set)
-    if (is.null(position_data))
-        pset_summary$pos_missing = TRUE
-    else
-        pset_summary$pos_missing = FALSE
-    
+
     # "not missing" index
     nm_idx = pset_summary$peptide %in% pos_table[, peptide]
     if (!all(nm_idx)) {
@@ -226,7 +222,7 @@
     
     # reorder peptides and summarized data by position
     pos_table_sub = pos_table[peptide %in% pset_summary$peptide]
-    match_idx = match(pset_summary$peptide, pos_table_sub[, peptide])
+    match_idx = match(pos_table_sub[, peptide], pset_summary$peptide)
     pset_summary = lapply(pset_summary, function(x, idx) {
                 d = dim(x)
                 if (is.null(d)) {
