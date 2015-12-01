@@ -66,13 +66,15 @@ class PairedMcmc: public MarkovChain {
     bool update_omega, update_omega_hypers;
     bool update_mu, update_beta0, update_beta1, update_beta_hypers;
     bool update_precision, update_precision_hypers;
-    bool update_weights, update_gamma, update_alpha;
+    bool update_weights, update_gamma, update_alpha, update_dof;
 
     bool share_nu_alpha;
 
     // t-distribution dof estimation helpers
-    double nu_err;
-    double nu_re;
+    double nu_err, nu_err_transform;
+    double nu_re, nu_re_transform;
+    MHTuner nu_err_tuner;
+    MHTuner nu_re_tuner;
     arma::mat w;
     arma::mat u;
     arma::mat mahala_dist;
@@ -128,7 +130,11 @@ class PairedMcmc: public MarkovChain {
     void updateGammaAlpha(const int & i, RngStream & rng);
     void computeMahalaDist(const int & i);
     void updateWeights(const int & i, RngStream & rng);
+    void updateNuErr(RngStream & rng);
+    void updateNuRe(RngStream & rng);
+    double dfReDensity(const double x);
     double dfJointDensity(const double x);
+
 
 public:
     PairedMcmc(const Rcpp::List & par_list, const Rcpp::List & data_list,

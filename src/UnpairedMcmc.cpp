@@ -31,9 +31,10 @@ UnpairedMcmc::UnpairedMcmc(const Rcpp::List & par_list,
         s_eps_rate(Rcpp::as<double>(par_list["s_eps_rate"])),
         lambda_a(Rcpp::as<double>(par_list["lambda_a"])),
         lambda_b(Rcpp::as<double>(par_list["lambda_b"])),
-        nu(Rcpp::as<double>(par_list["nu"])),
         m_beta1_tuner(n_burn),
-        nu_beta1_tuner(n_burn)
+        nu_beta1_tuner(n_burn),
+        nu_re_tuner(n_burn),
+        nu_err_tuner(n_burn)
 {
     // set seed for arma's RNG generator so that initializations
     // are reproducible.
@@ -59,6 +60,13 @@ UnpairedMcmc::UnpairedMcmc(const Rcpp::List & par_list,
     w_ctl = Rcpp::as<arma::mat>(par_list["w_ctl"]);
     u_trt = Rcpp::as<arma::mat>(par_list["u_trt"]);
     u_ctl = Rcpp::as<arma::mat>(par_list["u_ctl"]);
+    nu_re = Rcpp::as<double>(par_list["nu"]);
+    nu_re_transform = log(nu_re - 2.0);
+    nu_err_transform = nu_re_transform;
+    nu_re = exp(nu_re_transform) + 2.0;
+    nu_err = exp(nu_err_transform) + 2.0;
+    mahala_dist_trt = arma::mat(n_peptide, n_trt, arma::fill::zeros);
+    mahala_dist_ctl = arma::mat(n_peptide, n_control, arma::fill::zeros);
 
     beta0 = Rcpp::as<arma::vec>(par_list["beta0"]);
     beta1 = Rcpp::as<arma::vec>(par_list["beta1"]);
@@ -108,7 +116,7 @@ UnpairedMcmc::UnpairedMcmc(const Rcpp::List & par_list,
         b_sampler[q] = AdaptiveGibbsSampler<BetaHyperConditional>(1.0, 10.0);
     }
 
-    hypers_trace = arma::mat(8, n_samples);
+    hypers_trace = arma::mat(10, n_samples);
     beta0_trace = arma::mat(n_peptide, n_samples);
     beta1_trace = arma::mat(n_peptide, n_samples);
     mu_trace = arma::mat(n_slide, n_samples);
@@ -131,6 +139,7 @@ UnpairedMcmc::UnpairedMcmc(const Rcpp::List & par_list,
     update_alpha = Rcpp::as<bool>(chain_list["update_alpha"]);
     update_weights = Rcpp::as<bool>(chain_list["update_weights"]);
     update_gamma = Rcpp::as<bool>(chain_list["update_gamma"]);
+    update_dof = Rcpp::as<bool>(chain_list["update_dof"]);
 
     Rcpp::Rcout << "Initialization complete. Running " <<
             (n_samples * n_thin + n_burn) << " total iterations" << std::endl;
@@ -139,48 +148,61 @@ UnpairedMcmc::UnpairedMcmc(const Rcpp::List & par_list,
 }
 
 void UnpairedMcmc::iterate() {
-    int th_id, p, i, q;
+    int th_id, p, i, q, j;
     // the order in which updates occur is important
-    #pragma omp parallel private(th_id, p, i, q) num_threads(n_threads)
+    #pragma omp parallel private(th_id, p, i, q, j) num_threads(n_threads)
     {
         th_id = omp_get_thread_num();
         #pragma omp for
-        for (i = 0; i < n_trt; i++) {
-            updateGammaAlphaWeights_Trt(i, rng[th_id]);
-        }
+        for (i = 0; i < n_slide; i++) {
+            computeMahalaDist(i);
+        };
+
+        #pragma omp single
+        {
+            if (update_dof) {
+                updateNuErr(rng[th_id]);
+                updateNuRe(rng[th_id]);
+            }
+        };
 
         #pragma omp for
-        for(i = 0; i < n_control; i++) {
-            updateAlphaWeights_Ctl(i, rng[th_id]);
-        }
+        for (i = 0; i < n_slide; i++) {
+            if (i < n_control) {
+                updateAlphaWeights_Ctl(i, rng[th_id]);
+            } else {
+                j = i - n_control;
+                updateGammaAlphaWeights_Trt(j, rng[th_id]);
+            }
+        };
 
         #pragma omp single
         {
             if (update_beta_hypers)
                 updateM0(rng[th_id]);
-        } // implied barrier
+        }; // implied barrier
 
         #pragma omp for
         for (p = 0; p < n_peptide; p++) {
             if (update_beta1)
                 updateBeta1(p, rng[th_id]);
-        }
+        };
 
         #pragma omp for
         for (p = 0; p < n_peptide; p++) {
             if (update_beta0)
                 updateBeta0(p, rng[th_id]);
-        }
+        };
 
         #pragma omp for
         for (i = 0; i < n_trt; i++) {
             computeMuMean_Trt(i);
-        }
+        };
 
         #pragma omp for
         for (i = 0; i < n_control; i++) {
             computeMuMean_Control(i);
-        }
+        };
 
         #pragma omp sections
         {
@@ -211,32 +233,32 @@ void UnpairedMcmc::iterate() {
                 if (update_beta_hypers)
                     updateNuBeta1(rng[th_id]);
             }
-        } // end sections
+        }; // end sections
 
         #pragma omp for
         for (p = 0; p < n_peptide; p++) {
             if (update_precision)
                 updateNuEps(p, rng[th_id]);
-        }
+        };
 
         #pragma omp for
         for (p = 0; p < n_peptide; p++) {
             if (update_precision)
                 updateNuAlpha(p, rng[th_id]);
-        }
+        };
 
         #pragma omp for
         for (q = 0; q < n_position; q++) {
             if (update_beta_hypers)
                 updateBetaHypers(q, rng[th_id]);
-        }
+        };
 
         #pragma omp for
         for (p = 0; p < n_peptide; p++) {
             if (update_omega)
                 updateOmega(p, rng[th_id]);
-        }
-    }
+        };
+    };
 }
 
 void UnpairedMcmc::collectIteration(const int & sample_idx) {
@@ -258,6 +280,8 @@ void UnpairedMcmc::collectIteration(const int & sample_idx) {
     hypers_trace(5, sample_idx) = nu_beta0;
     hypers_trace(6, sample_idx) = m_beta1;
     hypers_trace(7, sample_idx) = nu_beta1;
+    hypers_trace(8, sample_idx) = nu_err;
+    hypers_trace(9, sample_idx) = nu_re;
 
     ppa = ppa * ((double) sample_idx / (sample_idx + 1.0)) + gamma_prob / (sample_idx + 1.0);
 }
@@ -300,8 +324,29 @@ void UnpairedMcmc::updateGammaAlphaWeights_Trt(const int & i,
     double alpha_mean, alpha_prec, lambda_w, lambda_u, delta;
 
     for(p = 0; p < n_peptide; p++) {
-        delta0 = (y_mean_trt(p, i) - beta0(p) - mu1);
+        // update weights first because they are integrated out
+        // for dof updates
+        delta0 = y_mean_trt(p, i) - beta0(p) - mu1;
         delta1 = delta0 - beta1(p);
+
+        if (gamma(p, i) > 0.5) {
+            delta = delta1 - alpha_trt(p, i);
+        } else {
+            delta = delta0 - alpha_trt(p, i);
+        }
+
+        if (update_weights) {
+            lambda_w = .5 * (nu_err - 2.0) + .5 * nu_eps(p) * n_rep(p) *
+                    delta * delta +
+                    .5 * nu_eps(p) * y_ss_trt(p, i);
+            w_trt(p, i) = RngStream_GA1(.5 * nu_err + .5 * n_rep(p), rng) /
+                    lambda_w;
+
+            lambda_u = gamma(p, i) > 0.5 ? nu_alpha1(p) : nu_alpha0(p);
+            lambda_u *= .5 * alpha_trt(p, i) * alpha_trt(p, i);
+            lambda_u += .5 * (nu_re - 2.0);
+            u_trt(p, i) = RngStream_GA1(.5 * nu_re + .5, rng) / lambda_u;
+        }
 
         nu_star0 = nu_eps(p) * n_rep(p) * w_trt(p, i) +
                 nu_alpha0(p) * u_trt(p, i);
@@ -328,7 +373,7 @@ void UnpairedMcmc::updateGammaAlphaWeights_Trt(const int & i,
             gamma(p, i) = (RngStream_RandU01(rng) <= prob) ? 1.0 : 0.0;
         }
 
-        if ((gamma(p, i) > 0.0) ) {
+        if (gamma(p, i) > 0.5) {
             alpha_mean = mu_star1;
             alpha_prec = nu_star1;
         } else {
@@ -340,22 +385,6 @@ void UnpairedMcmc::updateGammaAlphaWeights_Trt(const int & i,
             alpha_trt(p, i) = RngStream_N01(rng) / sqrt(alpha_prec) + alpha_mean;
         }
 
-        if (gamma(p, i) > 0.0) {
-            delta = delta1 - alpha_trt(p, i);
-        } else {
-            delta = delta0 - alpha_trt(p, i);
-        }
-
-        if (update_weights) {
-            lambda_w = .5 * nu + .5 * nu_eps(p) * n_rep(p) * delta * delta +
-                    .5 * nu_eps(p) * y_ss_trt(p, i);
-            w_trt(p, i) = RngStream_GA1(.5 * nu + .5 * n_rep(p), rng) / lambda_w;
-
-            lambda_u = gamma(p, i) > 0.0 ? nu_alpha1(p) : nu_alpha0(p);
-            lambda_u *= .5 * alpha_trt(p, i) * alpha_trt(p, i);
-            lambda_u += .5 * nu;
-            u_trt(p, i) = RngStream_GA1(.5 * nu, rng) / lambda_u;
-        }
     }
     return;
 }
@@ -368,24 +397,25 @@ void UnpairedMcmc::updateAlphaWeights_Ctl(const int & i, RngStream & rng) {
     double delta;
     double lambda;
     for(p = 0; p < n_peptide; p++) {
-        delta = y_mean_control(p, i) - beta0(p) - mu0;
+        delta = y_mean_control(p, i) - beta0(p) - mu0 - alpha_ctl(p, i);
+        lambda = .5 * nu_eps(p) *
+                (n_rep(p) * delta * delta + y_ss_control(p, i)) +
+                .5 * (nu_err - 2.0);
+        if (update_weights) {
+            w_ctl(p, i) = RngStream_GA1(.5 * (n_rep(p) + nu_err), rng) / lambda;
+        }
+        lambda = .5 * nu_alpha0(p) * alpha_ctl(p, i) * alpha_ctl(p, i) +
+                .5 * (nu_re - 2.0);
+        if (update_weights) {
+            u_ctl(p, i) = RngStream_GA1(.5 * (1.0 + nu_re), rng) / lambda;
+        }
+
+        delta += alpha_ctl(p, i);
         nu_star = n_rep(p) * nu_eps(p) * w_ctl(p, i) +
                 nu_alpha0(p) * u_ctl(p, i);
         mu_star = n_rep(p) * nu_eps(p) * w_ctl(p, i) * delta / nu_star;
         if (update_alpha) {
             alpha_ctl(p, i) = RngStream_N01(rng) / sqrt(nu_star) + mu_star;
-        }
-        delta = delta - alpha_ctl(p, i);
-        lambda = .5 * nu_eps(p) *
-                (n_rep(p) * delta * delta + y_ss_control(p, i)) +
-                .5 * nu;
-        if (update_weights) {
-            w_ctl(p, i) = RngStream_GA1(.5 * (n_rep(p) + nu), rng) / lambda;
-        }
-        lambda = .5 * nu_alpha0(p) * alpha_ctl(p, i) * alpha_ctl(p, i) +
-                .5 * nu;
-        if (update_weights) {
-            u_ctl(p, i) = RngStream_GA1(.5 * (1.0 + nu), rng) / lambda;
         }
     }
     return;
@@ -598,9 +628,12 @@ void UnpairedMcmc::updateM1(RngStream & rng) {
     const double cur_to_prop = - log(prop_m1);
     const double prop_to_cur = - log(m_beta1);
 
-    m_beta1 = metropolisHastings(m_beta1, cur_lik, cur_to_prop,
+    const bool accept = metropolisHastings(m_beta1, cur_lik, cur_to_prop,
             prop_m1, prop_lik, prop_to_cur, rng);
-    m_beta1_tuner.update(m_beta1 == prop_m1);
+    m_beta1_tuner.update(accept);
+    if (accept) {
+        m_beta1 = prop_m1;
+    }
     return;
 }
 
@@ -623,9 +656,13 @@ void UnpairedMcmc::updateNuBeta1(RngStream & rng) {
     const double cur_to_prop = -log(prop_nb1);
     const double prop_to_cur = -log(nu_beta1);
 
-    nu_beta1 = metropolisHastings(nu_beta1, cur_lik, cur_to_prop, prop_nb1,
+    const bool accept = metropolisHastings(nu_beta1, cur_lik, cur_to_prop, prop_nb1,
             prop_lik, prop_to_cur, rng);
-    nu_beta1_tuner.update(nu_beta1 == prop_nb1);
+    nu_beta1_tuner.update(accept);
+    if (accept) {
+        nu_beta1 = prop_nb1;
+    }
+    return;
 }
 
 void UnpairedMcmc::updateBetaHypers(const int & q, RngStream & rng) {
@@ -650,6 +687,141 @@ void UnpairedMcmc::updateBetaHypers(const int & q, RngStream & rng) {
         Rcpp::Rcout << a(q) << " " << b(q) << std::endl;
     }
 }
+
+void UnpairedMcmc::computeMahalaDist(const int & i) {
+    if (i < n_control)
+        mahalaDistCtl(i);
+    else
+        mahalaDistTrt(i - n_control);
+    return;
+}
+
+void UnpairedMcmc::mahalaDistTrt(const int & i) {
+    int p;
+    const double mu_trt(mu(n_control + i));
+    double diff;
+    for (p = 0; p < n_peptide; p++) {
+        diff = y_mean_trt(p, i) - beta0(p) - mu_trt - alpha_trt(p, i) -
+                gamma(p, i) * beta1(p);
+        mahala_dist_trt(p, i) = nu_eps(p) * (y_ss_trt(p, i) +
+                n_rep(p) * diff * diff);
+    }
+    return;
+}
+
+void UnpairedMcmc::mahalaDistCtl(const int & i) {
+    int p;
+    const double mu_ctl(mu(i));
+    double diff;
+    for (p = 0; p < n_peptide; p++) {
+        diff = y_mean_control(p, i) - beta0(p) - mu_ctl - alpha_ctl(p, i);
+        mahala_dist_ctl(p, i) = nu_eps(p) * (y_ss_control(p, i) +
+                n_rep(p) * diff * diff);
+    }
+    return;
+}
+
+void UnpairedMcmc::updateNuErr(RngStream & rng) {
+    const double cur_val = nu_err_transform;
+    const double cur_lik = dfErrDensity(exp(cur_val) + 2.0);
+    const double cur_to_prop = 0.0;
+
+    const double prop_val = cur_val + (RngStream_RandU01(rng) - .5) *
+            nu_err_tuner.getScale();
+    const double prop_lik = dfErrDensity(exp(prop_val) + 2.0);
+    const double prop_to_cur = 0.0;
+
+    const bool accept = metropolisHastings(cur_val, cur_lik, cur_to_prop,
+            prop_val, prop_lik, prop_to_cur, rng);
+    nu_err_tuner.update(accept);
+    if (accept) {
+        nu_err_transform = prop_val;
+        nu_err = exp(nu_err_transform) + 2.0;
+    }
+    return;
+}
+
+void UnpairedMcmc::updateNuRe(RngStream & rng) {
+    const double cur_val = nu_re_transform;
+    const double cur_lik = dfReDensity(exp(cur_val) + 2.0);
+    const double cur_to_prop = 0.0;
+
+    const double prop_val = cur_val + (RngStream_RandU01(rng) - .5) *
+            nu_re_tuner.getScale();
+    const double prop_lik = dfReDensity(exp(prop_val) + 2.0);
+    const double prop_to_cur = 0.0;
+
+    const bool accept = metropolisHastings(cur_val, cur_lik, cur_to_prop,
+            prop_val, prop_lik, prop_to_cur, rng);
+    nu_re_tuner.update(accept);
+    if (accept) {
+        nu_re_transform = prop_val;
+        nu_re = exp(nu_re_transform) + 2.0;
+    }
+    return;
+}
+
+double UnpairedMcmc::dfReDensity(const double x) {
+    int p, i;
+    double lik(0.0);
+    double d;
+    const double lg_diff = R::lgammafn(.5 + .5 * x) - R::lgammafn(.5 * x);
+    const double lxm2 = log(x - 2.0);
+    // control pop subjects
+    for (i = 0; i < n_control; i++) {
+        for (p = 0; p < n_peptide; p++) {
+            d = alpha_ctl(p, i);
+            lik += -.5 * (1.0 + x) * log1p(d * d * nu_alpha0(p) / (x - 2.0));
+        }
+    }
+    // treatment pop subjects
+    for (i = 0; i < n_trt; i++) {
+        for (p = 0; p < n_peptide; p++) {
+            if (gamma(p , i) > .5) {
+                d = nu_alpha1(p);
+            } else {
+                d = nu_alpha0(p);
+            }
+            d *= alpha_trt(p, i) * alpha_trt(p, i);
+            lik += -.5 * (1.0 + x) * log1p(d / (x - 2.0));
+        }
+    }
+    // normalizing constants
+    lik += n_peptide * (n_control + n_trt) * (lg_diff - .5 * lxm2);
+    //prior
+    lik += lxm2 - exp(lxm2) / 2.0;
+    return (lik);
+}
+
+double UnpairedMcmc::dfErrDensity(const double x) {
+    int p, i;
+    double lik(0.0), d, lg_top;
+    const double lg_bot(R::lgammafn(.5 * x));
+    const double lxm2 = log(x - 2.0);
+    // normalizing constants from t-dist
+    for (p = 0; p < n_peptide; p++) {
+        lg_top = R::lgammafn(.5 * (n_rep(p) + x));
+        lik += (n_control + n_trt) * (lg_top - lg_bot - .5 * n_rep(p) * lxm2);
+    }
+    // control pop subjects
+    for (i = 0; i < n_control; i++) {
+        for (p = 0; p < n_peptide; p++) {
+            d = mahala_dist_ctl(p, i);
+            lik += -.5 * (n_rep(p) + x) * log1p(d / (x - 2.0));
+        }
+    }
+    // treatment pop subjects
+    for (i = 0; i < n_trt; i++) {
+        for (p = 0; p < n_peptide; p++) {
+            d = mahala_dist_trt(p, i);
+            lik += -.5 * (n_rep(p) + x) * log1p(d / (x - 2.0));
+        }
+    }
+    //prior
+    lik += lxm2 - exp(lxm2) / 2.0;
+    return (lik);
+}
+
 
 
 

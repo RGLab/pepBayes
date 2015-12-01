@@ -1,5 +1,5 @@
 /*
- * UnPairedMcmc.h
+ * UnpairedMcmc.h
  *
  *  Created on: Nov 21, 2014
  *      Author: gimholte
@@ -64,17 +64,19 @@ class UnpairedMcmc: public MarkovChain {
     const double s_eps_rate;
     const double lambda_a;
     const double lambda_b;
-    const double nu;
 
     bool update_omega, update_omega_hypers;
     bool update_mu, update_beta0, update_beta1, update_beta_hypers;
     bool update_precision, update_precision_hypers;
-    bool update_alpha, update_weights, update_gamma;
+    bool update_alpha, update_weights, update_gamma, update_dof;
 
     arma::mat w_trt;
     arma::mat w_ctl;
     arma::mat u_trt;
     arma::mat u_ctl;
+    arma::mat mahala_dist_trt, mahala_dist_ctl;
+    double nu_err, nu_err_transform;
+    double nu_re, nu_re_transform;
 
     arma::vec mu_mean;
     arma::vec mu_star_mean;
@@ -83,7 +85,7 @@ class UnpairedMcmc: public MarkovChain {
     arma::vec mu_temp;
     arma::mat Q, mu_omega;
 
-    MHTuner m_beta1_tuner, nu_beta1_tuner;
+    MHTuner m_beta1_tuner, nu_beta1_tuner, nu_re_tuner, nu_err_tuner;
     std::vector<AdaptiveGibbsSampler<BetaHyperConditional> > a_sampler;
     std::vector<AdaptiveGibbsSampler<BetaHyperConditional> > b_sampler;
 
@@ -122,6 +124,14 @@ class UnpairedMcmc: public MarkovChain {
     void updateM1(RngStream & rng);
     void updateNuBeta1(RngStream & rng);
     void updateBetaHypers(const int & q, RngStream & rng);
+    void updateNuErr(RngStream & rng);
+    void updateNuRe(RngStream & rng);
+    void computeMahalaDist(const int & i);
+    void mahalaDistTrt(const int & i);
+    void mahalaDistCtl(const int & i);
+    double dfReDensity(const double x);
+    double dfErrDensity(const double x);
+
 
 public:
     UnpairedMcmc(const Rcpp::List & prior_pars, const Rcpp::List & data_list,
